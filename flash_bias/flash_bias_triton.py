@@ -1,5 +1,6 @@
 """
-This code is modified from the *Experimental* implementation of FlashAttention in Triton.
+FlashBias: Fast Computation of Attention with Bias https://arxiv.org/abs/2505.12044
+This code is modified from the Experimental implementation of FlashAttention in Triton.
 Tested with triton==2.0.0.dev20221202.
 Triton 2.0 has a new backend (MLIR) but seems like it doesn't yet work for head dimensions
 other than 64:
@@ -1122,7 +1123,8 @@ def _flash_attn_backward(
         do = do.contiguous()
     batch, seqlen_q, nheads, d = q.shape
     _, seqlen_k, _, _ = k.shape
-    _, _, _, rank = q_bias.shape
+    q_bias_batch, _, q_bias_head, rank = q_bias.shape
+    k_bias_batch, _, k_bias_head, rank = k_bias.shape
     # assert d in {16, 32, 64, 128}
     assert d <= 128
     seqlen_q_rounded = math.ceil(seqlen_q / 128) * 128
@@ -1132,8 +1134,12 @@ def _flash_attn_backward(
     assert dq_bias.stride(-1) == dk_bias.stride(-1)
     softmax_scale = softmax_scale or 1.0 / math.sqrt(d)
     dq_accum = torch.empty_like(q, dtype=torch.float32)
-    dq_bias_accum = torch.empty_like(q_bias, dtype=torch.float32)
     delta = torch.empty_like(lse)
+
+    q_bias = q_bias.expand(batch, seqlen_q, nheads, rank)
+    k_bias = k_bias.expand(batch, seqlen_k, nheads, rank)
+    dq_bias_accum = torch.empty_like(q_bias, dtype=torch.float32)
+    dk_bias_accum = torch.empty_like(k_bias, dtype=torch.float32)
 
     BLOCK_HEADDIM = max(triton.next_power_of_2(d), 16)
     BLOCK_RANKDIM = max(triton.next_power_of_2(rank), 16)
@@ -1192,7 +1198,7 @@ def _flash_attn_backward(
         dq_accum,
         dq_bias_accum,
         dk,
-        dk_bias,
+        dk_bias_accum,
         dv,
         lse,
         delta,
@@ -1225,9 +1231,9 @@ def _flash_attn_backward(
         dk.stride(0),
         dk.stride(2),
         dk.stride(1),
-        dk_bias.stride(0),
-        dk_bias.stride(2),
-        dk_bias.stride(1),
+        dk_bias_accum.stride(0),
+        dk_bias_accum.stride(2),
+        dk_bias_accum.stride(1),
         dv.stride(0),
         dv.stride(2),
         dv.stride(1),
@@ -1251,7 +1257,24 @@ def _flash_attn_backward(
         # num_stages=1,
     )
     dq.copy_(dq_accum)
-    dq_bias.copy_(dq_bias_accum)
+    if q_bias_batch == 1:
+        dq_bias_accum = dq_bias_accum.sum(dim=0, keepdim=True)
+        if q_bias_head == 1:
+            dq_bias_accum = dq_bias_accum.sum(dim=2, keepdim=True)
+        dq_bias.copy_(dq_bias_accum)
+    else:
+        if q_bias_head == 1:
+            dq_bias_accum = dq_bias_accum.sum(dim=2, keepdim=True)
+        dq_bias.copy_(dq_bias_accum)
+    if k_bias_batch == 1:
+        dk_bias_accum = dk_bias_accum.sum(dim=0, keepdim=True)
+        if q_bias_head == 1:
+            dk_bias_accum = dk_bias_accum.sum(dim=2, keepdim=True)
+        dk_bias.copy_(dk_bias_accum)
+    else:
+        if k_bias_head == 1:
+            dk_bias_accum = dk_bias_accum.sum(dim=2, keepdim=True)
+        dk_bias.copy_(dk_bias_accum)
 
 
 class FlashBiasFunc(torch.autograd.Function):
@@ -1260,10 +1283,10 @@ class FlashBiasFunc(torch.autograd.Function):
         """
         q: (batch_size, seqlen_q, nheads, headdim)
         k, v: (batch_size, seqlen_k, nheads, headdim)
-        q_bias: (batch_size, seqlen_q, nheads, headdim) or (1, seqlen_q, nheads, headdim)
-        k_bias: (batch_size, seqlen_k, nheads, headdim) or (1, seqlen_k, nheads, headdim)
+        q_bias: (batch_size, seqlen_q, nheads, rankdim) or (1, seqlen_q, nheads, rankdim) or (1, seqlen_q, 1, rankdim) or (batch_size, seqlen_q, 1, rankdim)
+        k_bias: (batch_size, seqlen_k, nheads, rankdim) or (1, seqlen_k, nheads, rankdim) or (1, seqlen_q, 1, rankdim) or (batch_size, seqlen_q, 1, rankdim)
         mask: optional, shape broadcastible to (batch, nheads, seqlen_q, seqlen_k).
-        softmax_scale: should be set as 1, otherwise directly multiply to q vector.
+        softmax_scale: should be set as 1 / sqrt(headdim), otherwise directly multiply to the q vector. If set as None, it will be set as 1 / sqrt(headdim)
         """
         # Make sure that the last dimension is contiguous
         q, k, v, q_bias, k_bias = [x if x.stride(-1) == 1 else x.contiguous() for x in [q, k, v, q_bias, k_bias]]

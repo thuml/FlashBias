@@ -1,7 +1,30 @@
 # FlashBias (NeurIPS 2025)
 FlashBias: Fast Computation of Attention with Bias [[Paper]](https://arxiv.org/pdf/2505.12044)
 
+Attention with bias widely exists, such as relative position encoding in [Swin Transformer](https://github.com/microsoft/Swin-Transformer), scientific prior encoding in [AlphaFold (Nature 2024)](https://www.nature.com/articles/s41586-024-07487-w) and [Pangu-Weather (Nature 2023)](https://www.nature.com/articles/s41586-023-06185-3). Surprisingly, despite the common use of attention with bias, its targeted efficiency optimization remains absent.
+
+This paper presents [FlashBias](https://arxiv.org/pdf/2505.12044) based on the low-rank compressed sensing theory, which can provide fast-exact computation for many widely used attention biases, enabling 1.5× speedup for AlphaFold, and over 2× speedup for attention with bias in vision and language models without loss of accuracy.
+
+<p align="center">
+<img src=".\pic\flashbias.png" height = "250" alt="" align=center />
+<br><br>
+<b>Figure 1.</b> Overview of FlashBias.
+</p>
+
+## Get Started
+
 Check `./flash_bias` for Triton kernel.
+
+## Overall Comparison
+
+A significant memory and running time reduction compared to vanilla FlashAttention.
+
+<p align="center">
+<img src=".\pic\efficiency.png" height = "250" alt="" align=center />
+<br><br>
+<b>Figure 2.</b> Efficiency comparison with vanilla FlashAttention.
+</p>
+
 
 ## Citation
 
