@@ -1,7 +1,8 @@
 # Triton Implementation of FlashBias
 This is a Triton implementation of FlashBias, which supports both forward and backward attention computation with decomposed bias terms in the following formalization:
+
 $$
-o=\operatorname{softmax}(\frac{\mathbf{q}\mathbf{k}^\top}{\sqrt{C}}+\mathbf{b})\mathbf{v}=\operatorname{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{q}_{\mathbf{bias}}\mathbf{k}_{\mathbf{bias}}^\top)\mathbf{v}
+\mathbf{o}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{b})\mathbf{v}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{q}_{\text{bias}}\mathbf{k}_{\text{bias}}^\top)\mathbf{v}
 $$
 
 ## Quick Start
