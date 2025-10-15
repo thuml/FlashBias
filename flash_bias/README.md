@@ -1,19 +1,19 @@
 # Triton Implementation of FlashBias
 This is a Triton implementation of FlashBias, which supports both forward and backward attention computation with decomposed bias terms in the following formalization:
 $$
-\mathbf{o}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{b})\mathbf{v}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{q}_{\text{bias}}\mathbf{k}_{\text{bias}}^\top)\mathbf{v}
+\mathbf{o}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{b})\mathbf{v}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{q}_{\text{bias}}\mathbf{k}_{\text{bias}}^T)\mathbf{v}
 $$
 
 ## Benchmark
 
 1. Install `python=3.9, torch>=2.0.0, triton>=2.0.0, xformers`.
-2. Excute the following command for benchmarking.
+2. Execute the following command for benchmarking.
 
 ```bash
 python benchmark.py
 ```
 
-3. Check efficiency benchmark among
+3. Check the efficiency benchmark among
 
 - Triton implementation of FlashBias (**Ours**)
 - Triton implementation of FlashAttention with Bias ([Opensource Implementation](https://github.com/pengzhangzhi/Flash-Attention-with-Bias-Triton))
