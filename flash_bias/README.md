@@ -1,5 +1,6 @@
 # Triton Implementation of FlashBias
 This is a Triton implementation of FlashBias, which supports both forward and backward attention computation with decomposed bias terms in the following formalization:
+
 $$
 \mathbf{o}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{b})\mathbf{v}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{q}_{\text{bias}}\mathbf{k}_{\text{bias}}^T)\mathbf{v}
 $$
@@ -24,16 +25,17 @@ python benchmark.py
 
 ## Efficiency Comparison
 
-<p><div style="display: flex; justify-content: space-between;">
-  <div style="width: 48%; text-align: center;">
-    <img src="attention-comparison-batch2-head4-d32-r8-fwd.png" alt="Forward" style="width: 100%;">
-    <p>(a) Forward Efficiency.</p>
-  </div>
-  <div style="width: 48%; text-align: center;">
-    <img src="attention-comparison-batch2-head4-d32-r8-bwd.png" alt="Backward" style="width: 100%;">
-    <p>(b) Backward Efficiency.</p>
-  </div>
-</div></p>
+<p align="center">
+<img src=".\attention-comparison-batch2-head4-d32-r8-fwd.png" height = "250" alt="" align=center />
+<br><br>
+<b>Figure 1.</b> Efficiency comparison for forward pass.
+</p>
+
+<p align="center">
+<img src=".\attention-comparison-batch2-head4-d32-r8-bwd.png" height = "250" alt="" align=center />
+<br><br>
+<b>Figure 2.</b> Efficiency comparison for backward propagation.
+</p>
 
 ## Quick Start of FlashBias
 
