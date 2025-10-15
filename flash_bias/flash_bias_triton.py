@@ -61,7 +61,8 @@ def keep(conf):
 
 @triton.autotune(
     list(filter(keep, configs)),
-    key=["CACHE_KEY_SEQLEN_Q", "CACHE_KEY_SEQLEN_K", "MASK_TYPE", "IS_CAUSAL", "BLOCK_HEADDIM", "BLOCK_RANKDIM"]
+    key=["CACHE_KEY_SEQLEN_Q", "CACHE_KEY_SEQLEN_K", "MASK_TYPE", "BIAS_TYPE", "IS_CAUSAL", "BLOCK_HEADDIM",
+         "BLOCK_RANKDIM"]
 )
 @triton.heuristics(
     {
@@ -113,6 +114,7 @@ def _fwd_kernel(
         CACHE_KEY_SEQLEN_Q,
         CACHE_KEY_SEQLEN_K,
         MASK_TYPE: tl.constexpr,
+        BIAS_TYPE: tl.constexpr,
         IS_CAUSAL: tl.constexpr,
         BLOCK_HEADDIM: tl.constexpr,
         BLOCK_RANKDIM: tl.constexpr,
@@ -148,12 +150,13 @@ def _fwd_kernel(
     v_ptrs = (
             V + off_b * stride_vb + off_h * stride_vh + (offs_n[:, None] * stride_vn + offs_d[None, :])
     )
-    q_bias_ptrs = (
-            Q_Bias + off_b * stride_q_bb + off_h * stride_q_bh + (offs_m[:, None] * stride_q_bm + offs_r[None, :])
-    )
-    k_bias_ptrs = (
-            K_Bias + off_b * stride_k_bb + off_h * stride_k_bh + (offs_n[:, None] * stride_k_bn + offs_r[None, :])
-    )
+    if BIAS_TYPE is not None:
+        q_bias_ptrs = (
+                Q_Bias + off_b * stride_q_bb + off_h * stride_q_bh + (offs_m[:, None] * stride_q_bm + offs_r[None, :])
+        )
+        k_bias_ptrs = (
+                K_Bias + off_b * stride_k_bb + off_h * stride_k_bh + (offs_n[:, None] * stride_k_bn + offs_r[None, :])
+        )
     if MASK_TYPE == "vector":
         m_ptrs = Mask + off_b * stride_mb + off_h * stride_mh + offs_n
     elif MASK_TYPE == "matrix":
@@ -176,10 +179,11 @@ def _fwd_kernel(
             q = tl.load(q_ptrs)
         else:
             q = tl.load(q_ptrs, mask=offs_d[None, :] < headdim, other=0.0)
-        if EVEN_RANKDIM:
-            q_bias = tl.load(q_bias_ptrs).to(tl.float32)
-        else:
-            q_bias = tl.load(q_bias_ptrs, mask=offs_r[None, :] < rankdim, other=0.0).to(tl.float32)
+        if BIAS_TYPE is not None:
+            if EVEN_RANKDIM:
+                q_bias = tl.load(q_bias_ptrs).to(tl.float32)
+            else:
+                q_bias = tl.load(q_bias_ptrs, mask=offs_r[None, :] < rankdim, other=0.0).to(tl.float32)
     else:
         if EVEN_HEADDIM:
             q = tl.load(q_ptrs, mask=offs_m[:, None] < seqlen_q, other=0.0)
@@ -187,12 +191,13 @@ def _fwd_kernel(
             q = tl.load(
                 q_ptrs, mask=(offs_m[:, None] < seqlen_q) & (offs_d[None, :] < headdim), other=0.0
             )
-        if EVEN_RANKDIM:
-            q_bias = tl.load(q_bias_ptrs, mask=offs_m[:, None] < seqlen_q, other=0.0).to(tl.float32)
-        else:
-            q_bias = tl.load(
-                q_bias_ptrs, mask=(offs_m[:, None] < seqlen_q) & (offs_r[None, :] < rankdim), other=0.0
-            ).to(tl.float32)
+        if BIAS_TYPE is not None:
+            if EVEN_RANKDIM:
+                q_bias = tl.load(q_bias_ptrs, mask=offs_m[:, None] < seqlen_q, other=0.0).to(tl.float32)
+            else:
+                q_bias = tl.load(
+                    q_bias_ptrs, mask=(offs_m[:, None] < seqlen_q) & (offs_r[None, :] < rankdim), other=0.0
+                ).to(tl.float32)
     # loop over k, v and update accumulator
     end_n = seqlen_k if not IS_CAUSAL else tl.minimum((start_m + 1) * BLOCK_M, seqlen_k)
     for start_n in range(0, end_n, BLOCK_N):
@@ -203,11 +208,12 @@ def _fwd_kernel(
                 k = tl.load(k_ptrs + start_n * stride_kn)
             else:
                 k = tl.load(k_ptrs + start_n * stride_kn, mask=offs_d[None, :] < headdim, other=0.0)
-            if EVEN_RANKDIM:
-                k_bias = tl.load(k_bias_ptrs + start_n * stride_k_bn).to(tl.float32)
-            else:
-                k_bias = tl.load(k_bias_ptrs + start_n * stride_k_bn, mask=offs_r[None, :] < rankdim, other=0.0).to(
-                    tl.float32)
+            if BIAS_TYPE is not None:
+                if EVEN_RANKDIM:
+                    k_bias = tl.load(k_bias_ptrs + start_n * stride_k_bn).to(tl.float32)
+                else:
+                    k_bias = tl.load(k_bias_ptrs + start_n * stride_k_bn, mask=offs_r[None, :] < rankdim, other=0.0).to(
+                        tl.float32)
         else:
             if EVEN_HEADDIM:
                 k = tl.load(
@@ -221,18 +227,19 @@ def _fwd_kernel(
                     mask=((start_n + offs_n)[:, None] < seqlen_k) & (offs_d[None, :] < headdim),
                     other=0.0,
                 )
-            if EVEN_RANKDIM:
-                k_bias = tl.load(
-                    k_bias_ptrs + start_n * stride_k_bn,
-                    mask=(start_n + offs_n)[:, None] < seqlen_k,
-                    other=0.0,
-                ).to(tl.float32)
-            else:
-                k_bias = tl.load(
-                    k_bias_ptrs + start_n * stride_k_bn,
-                    mask=((start_n + offs_n)[:, None] < seqlen_k) & (offs_r[None, :] < rankdim),
-                    other=0.0,
-                ).to(tl.float32)
+            if BIAS_TYPE is not None:
+                if EVEN_RANKDIM:
+                    k_bias = tl.load(
+                        k_bias_ptrs + start_n * stride_k_bn,
+                        mask=(start_n + offs_n)[:, None] < seqlen_k,
+                        other=0.0,
+                    ).to(tl.float32)
+                else:
+                    k_bias = tl.load(
+                        k_bias_ptrs + start_n * stride_k_bn,
+                        mask=((start_n + offs_n)[:, None] < seqlen_k) & (offs_r[None, :] < rankdim),
+                        other=0.0,
+                    ).to(tl.float32)
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         assert q.shape[1] == k.shape[1], "Inner dimension must match for matrix multiplication"
         k_t = tl.trans(k)
@@ -241,11 +248,12 @@ def _fwd_kernel(
         qk = qk * softmax_scale
 
         # processing bias term
-        assert q_bias.shape[1] == k_bias.shape[1], "Inner dimension must match for matrix multiplication"
-        k_bias_t = tl.trans(k_bias)
-        # tl.device_print("Tensor Q_bias: ", q_bias)
-        # tl.device_print("Tensor K_bias: ", k_bias)
-        qk += tl.dot(q_bias, k_bias_t)
+        if BIAS_TYPE is not None:
+            assert q_bias.shape[1] == k_bias.shape[1], "Inner dimension must match for matrix multiplication"
+            k_bias_t = tl.trans(k_bias)
+            # tl.device_print("Tensor Q_bias: ", q_bias)
+            # tl.device_print("Tensor K_bias: ", k_bias)
+            qk += tl.dot(q_bias, k_bias_t)
 
         # Trying to combine the two masks seem to make the result wrong
         if not EVEN_N:  # Need to mask out otherwise the softmax is wrong
@@ -393,7 +401,7 @@ def _bwd_preprocess_do_o_dot(
 
 
 @triton.jit
-def _bwd_store_dk_dv(
+def _bwd_store_dk_dv_dk_bias(
         dk_ptrs,
         dk_bias_ptrs,
         dv_ptrs,
@@ -420,10 +428,11 @@ def _bwd_store_dk_dv(
         else:
             tl.store(dv_ptrs, dv, mask=offs_d[None, :] < headdim)
             tl.store(dk_ptrs, dk, mask=offs_d[None, :] < headdim)
-        if EVEN_RANKDIM:
-            tl.store(dk_bias_ptrs, dk_bias)
-        else:
-            tl.store(dk_bias_ptrs, dk_bias, mask=offs_r[None, :] < rankdim)
+        if dk_bias_ptrs is not None:
+            if EVEN_RANKDIM:
+                tl.store(dk_bias_ptrs, dk_bias)
+            else:
+                tl.store(dk_bias_ptrs, dk_bias, mask=offs_r[None, :] < rankdim)
     else:
         if EVEN_HEADDIM:
             tl.store(dv_ptrs, dv, mask=offs_n[:, None] < seqlen_k)
@@ -431,10 +440,11 @@ def _bwd_store_dk_dv(
         else:
             tl.store(dv_ptrs, dv, mask=(offs_n[:, None] < seqlen_k) & (offs_d[None, :] < headdim))
             tl.store(dk_ptrs, dk, mask=(offs_n[:, None] < seqlen_k) & (offs_d[None, :] < headdim))
-        if EVEN_RANKDIM:
-            tl.store(dk_bias_ptrs, dk_bias, mask=offs_n[:, None] < seqlen_k)
-        else:
-            tl.store(dk_bias_ptrs, dk_bias, mask=(offs_n[:, None] < seqlen_k) & (offs_r[None, :] < rankdim))
+        if dk_bias_ptrs is not None:
+            if EVEN_RANKDIM:
+                tl.store(dk_bias_ptrs, dk_bias, mask=offs_n[:, None] < seqlen_k)
+            else:
+                tl.store(dk_bias_ptrs, dk_bias, mask=(offs_n[:, None] < seqlen_k) & (offs_r[None, :] < rankdim))
 
 
 @triton.jit
@@ -473,6 +483,7 @@ def _bwd_kernel_one_col_block(
         rankdim,
         ATOMIC_ADD: tl.constexpr,
         MASK_TYPE: tl.constexpr,
+        BIAS_TYPE: tl.constexpr,
         IS_CAUSAL: tl.constexpr,
         BLOCK_HEADDIM: tl.constexpr,
         BLOCK_RANKDIM: tl.constexpr,
@@ -494,12 +505,14 @@ def _bwd_kernel_one_col_block(
     # initialize pointers to value-like data
     q_ptrs = Q + (offs_qm[:, None] * stride_qm + offs_d[None, :])
     k_ptrs = K + (offs_n[:, None] * stride_kn + offs_d[None, :])
-    q_bias_ptrs = Q_Bias + (offs_qm[:, None] * stride_q_bm + offs_r[None, :])
-    k_bias_ptrs = K_Bias + (offs_n[:, None] * stride_k_bn + offs_r[None, :])
+    if BIAS_TYPE is not None:
+        q_bias_ptrs = Q_Bias + (offs_qm[:, None] * stride_q_bm + offs_r[None, :])
+        k_bias_ptrs = K_Bias + (offs_n[:, None] * stride_k_bn + offs_r[None, :])
     v_ptrs = V + (offs_n[:, None] * stride_vn + offs_d[None, :])
     do_ptrs = DO + (offs_qm[:, None] * stride_dom + offs_d[None, :])
     dq_ptrs = DQ + (offs_qm[:, None] * stride_dqm + offs_d[None, :])
-    dq_bias_ptrs = DQ_Bias + (offs_qm[:, None] * stride_dq_bm + offs_r[None, :])
+    if BIAS_TYPE is not None:
+        dq_bias_ptrs = DQ_Bias + (offs_qm[:, None] * stride_dq_bm + offs_r[None, :])
     if MASK_TYPE == "vector":
         m_ptrs = Mask + offs_n
     elif MASK_TYPE == "matrix":
@@ -507,7 +520,8 @@ def _bwd_kernel_one_col_block(
     # initialize dv and dk
     dv = tl.zeros([BLOCK_N, BLOCK_HEADDIM], dtype=tl.float32)
     dk = tl.zeros([BLOCK_N, BLOCK_HEADDIM], dtype=tl.float32)
-    dk_bias = tl.zeros([BLOCK_N, BLOCK_RANKDIM], dtype=tl.float32)
+    if BIAS_TYPE is not None:
+        dk_bias = tl.zeros([BLOCK_N, BLOCK_RANKDIM], dtype=tl.float32)
     # There seems to be some problem with Triton pipelining that makes results wrong for
     # headdim=64, seqlen=(113, 255), bias_type='matrix'. In this case the for loop
     # may have zero step, and pipelining with the bias matrix could screw it up.
@@ -515,25 +529,45 @@ def _bwd_kernel_one_col_block(
     if begin_m >= seqlen_q:
         dv_ptrs = DV + (offs_n[:, None] * stride_dvn + offs_d[None, :])
         dk_ptrs = DK + (offs_n[:, None] * stride_dkn + offs_d[None, :])
-        dk_bias_ptrs = DK_Bias + (offs_n[:, None] * stride_dk_bn + offs_r[None, :])
-        _bwd_store_dk_dv(
-            dk_ptrs,
-            dk_bias_ptrs,
-            dv_ptrs,
-            dk,
-            dk_bias,
-            dv,
-            offs_n,
-            offs_d,
-            offs_r,
-            seqlen_k,
-            headdim,
-            rankdim,
-            EVEN_M=EVEN_M,
-            EVEN_N=EVEN_N,
-            EVEN_HEADDIM=EVEN_HEADDIM,
-            EVEN_RANKDIM=EVEN_RANKDIM,
-        )
+        if BIAS_TYPE is not None:
+            dk_bias_ptrs = DK_Bias + (offs_n[:, None] * stride_dk_bn + offs_r[None, :])
+            _bwd_store_dk_dv_dk_bias(
+                dk_ptrs,
+                dk_bias_ptrs,
+                dv_ptrs,
+                dk,
+                dk_bias,
+                dv,
+                offs_n,
+                offs_d,
+                offs_r,
+                seqlen_k,
+                headdim,
+                rankdim,
+                EVEN_M=EVEN_M,
+                EVEN_N=EVEN_N,
+                EVEN_HEADDIM=EVEN_HEADDIM,
+                EVEN_RANKDIM=EVEN_RANKDIM,
+            )
+        else:
+            _bwd_store_dk_dv_dk_bias(
+                dk_ptrs,
+                None,
+                dv_ptrs,
+                dk,
+                None,
+                dv,
+                offs_n,
+                offs_d,
+                offs_r,
+                seqlen_k,
+                headdim,
+                rankdim,
+                EVEN_M=EVEN_M,
+                EVEN_N=EVEN_N,
+                EVEN_HEADDIM=EVEN_HEADDIM,
+                EVEN_RANKDIM=EVEN_RANKDIM,
+            )
         return
     # k and v stay in SRAM throughout
     # [2022-10-30] TD: Same bug as the fwd. In the case of EVEN_N=True and EVEN_M=False,
@@ -545,10 +579,11 @@ def _bwd_kernel_one_col_block(
         else:
             k = tl.load(k_ptrs, mask=offs_d[None, :] < headdim, other=0.0)
             v = tl.load(v_ptrs, mask=offs_d[None, :] < headdim, other=0.0)
-        if EVEN_RANKDIM:
-            k_bias = tl.load(k_bias_ptrs)
-        else:
-            k_bias = tl.load(k_bias_ptrs, mask=offs_r[None, :] < rankdim, other=0.0)
+        if BIAS_TYPE is not None:
+            if EVEN_RANKDIM:
+                k_bias = tl.load(k_bias_ptrs)
+            else:
+                k_bias = tl.load(k_bias_ptrs, mask=offs_r[None, :] < rankdim, other=0.0)
     else:
         if EVEN_HEADDIM:
             k = tl.load(k_ptrs, mask=offs_n[:, None] < seqlen_k, other=0.0)
@@ -560,12 +595,13 @@ def _bwd_kernel_one_col_block(
             v = tl.load(
                 v_ptrs, mask=(offs_n[:, None] < seqlen_k) & (offs_d[None, :] < headdim), other=0.0
             )
-        if EVEN_RANKDIM:
-            k_bias = tl.load(k_bias_ptrs, mask=offs_n[:, None] < seqlen_k, other=0.0)
-        else:
-            k_bias = tl.load(
-                k_bias_ptrs, mask=(offs_n[:, None] < seqlen_k) & (offs_r[None, :] < rankdim), other=0.0
-            )
+        if BIAS_TYPE is not None:
+            if EVEN_RANKDIM:
+                k_bias = tl.load(k_bias_ptrs, mask=offs_n[:, None] < seqlen_k, other=0.0)
+            else:
+                k_bias = tl.load(
+                    k_bias_ptrs, mask=(offs_n[:, None] < seqlen_k) & (offs_r[None, :] < rankdim), other=0.0
+                )
     # loop over rows
     num_block_m = tl.cdiv(seqlen_q, BLOCK_M)
     for start_m in range(begin_m, num_block_m * BLOCK_M, BLOCK_M):
@@ -584,22 +620,25 @@ def _bwd_kernel_one_col_block(
                     mask=(offs_m_curr[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
                     other=0.0,
                 )
-        if EVEN_M & EVEN_RANKDIM:
-            q_bias = tl.load(q_bias_ptrs)
-        else:
-            if EVEN_RANKDIM:
-                q_bias = tl.load(q_bias_ptrs, mask=offs_m_curr[:, None] < seqlen_q, other=0.0)
+        if BIAS_TYPE is not None:
+            if EVEN_M & EVEN_RANKDIM:
+                q_bias = tl.load(q_bias_ptrs)
             else:
-                q_bias = tl.load(
-                    q_bias_ptrs,
-                    mask=(offs_m_curr[:, None] < seqlen_q) & (offs_r[None, :] < rankdim),
-                    other=0.0,
-                )
+                if EVEN_RANKDIM:
+                    q_bias = tl.load(q_bias_ptrs, mask=offs_m_curr[:, None] < seqlen_q, other=0.0)
+                else:
+                    q_bias = tl.load(
+                        q_bias_ptrs,
+                        mask=(offs_m_curr[:, None] < seqlen_q) & (offs_r[None, :] < rankdim),
+                        other=0.0,
+                    )
         # recompute p = softmax(qk, dim=-1).T
         # qk = tl.dot(q, k, trans_b=True)
         k_t = tl.trans(k)
-        k_bias_t = tl.trans(k_bias)
-        qk = tl.dot(q, k_t) * softmax_scale + tl.dot(q_bias, k_bias_t)
+        qk = tl.dot(q, k_t) * softmax_scale
+        if BIAS_TYPE is not None:
+            k_bias_t = tl.trans(k_bias)
+            qk += tl.dot(q_bias, k_bias_t)
         # Trying to combine the two masks seem to make the result wrong
         if not EVEN_N:  # Need to mask out otherwise the softmax is wrong
             qk = tl.where(offs_n[None, :] < seqlen_k, qk, float("-inf"))
@@ -676,7 +715,8 @@ def _bwd_kernel_one_col_block(
         # compute dk = dot(ds.T, q)
         ds_t = tl.trans(ds)
         dk += tl.dot(ds_t, q) * softmax_scale
-        dk_bias += tl.dot(ds_t, q_bias)
+        if BIAS_TYPE is not None:
+            dk_bias += tl.dot(ds_t, q_bias)
         # compute dq
         if not (
                 EVEN_M & EVEN_HEADDIM
@@ -687,9 +727,10 @@ def _bwd_kernel_one_col_block(
                 dq = tl.load(dq_ptrs, eviction_policy="evict_last")
                 dq += tl.dot(ds, k) * softmax_scale
                 tl.store(dq_ptrs, dq, eviction_policy="evict_last")
-                dq_bias = tl.load(dq_bias_ptrs, eviction_policy="evict_last")
-                dq_bias += tl.dot(ds, k_bias)
-                tl.store(dq_bias_ptrs, dq_bias, eviction_policy="evict_last")
+                if BIAS_TYPE is not None:
+                    dq_bias = tl.load(dq_bias_ptrs, eviction_policy="evict_last")
+                    dq_bias += tl.dot(ds, k_bias)
+                    tl.store(dq_bias_ptrs, dq_bias, eviction_policy="evict_last")
             else:
                 if EVEN_HEADDIM:
                     dq = tl.load(
@@ -705,19 +746,20 @@ def _bwd_kernel_one_col_block(
                         mask=offs_m_curr[:, None] < seqlen_q,
                         eviction_policy="evict_last",
                     )
-                    dq_bias = tl.load(
-                        dq_bias_ptrs,
-                        mask=offs_m_curr[:, None] < seqlen_q,
-                        other=0.0,
-                        eviction_policy="evict_last",
-                    )
-                    dq_bias += tl.dot(ds, k_bias)
-                    tl.store(
-                        dq_bias_ptrs,
-                        dq_bias,
-                        mask=offs_m_curr[:, None] < seqlen_q,
-                        eviction_policy="evict_last",
-                    )
+                    if BIAS_TYPE is not None:
+                        dq_bias = tl.load(
+                            dq_bias_ptrs,
+                            mask=offs_m_curr[:, None] < seqlen_q,
+                            other=0.0,
+                            eviction_policy="evict_last",
+                        )
+                        dq_bias += tl.dot(ds, k_bias)
+                        tl.store(
+                            dq_bias_ptrs,
+                            dq_bias,
+                            mask=offs_m_curr[:, None] < seqlen_q,
+                            eviction_policy="evict_last",
+                        )
                 else:
                     dq = tl.load(
                         dq_ptrs,
@@ -732,22 +774,24 @@ def _bwd_kernel_one_col_block(
                         mask=(offs_m_curr[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
                         eviction_policy="evict_last",
                     )
-                    dq_bias = tl.load(
-                        dq_bias_ptrs,
-                        mask=(offs_m_curr[:, None] < seqlen_q) & (offs_r[None, :] < rankdim),
-                        other=0.0,
-                        eviction_policy="evict_last",
-                    )
-                    dq_bias += tl.dot(ds, k_bias)
-                    tl.store(
-                        dq_bias_ptrs,
-                        dq_bias,
-                        mask=(offs_m_curr[:, None] < seqlen_q) & (offs_r[None, :] < rankdim),
-                        eviction_policy="evict_last",
-                    )
+                    if BIAS_TYPE is not None:
+                        dq_bias = tl.load(
+                            dq_bias_ptrs,
+                            mask=(offs_m_curr[:, None] < seqlen_q) & (offs_r[None, :] < rankdim),
+                            other=0.0,
+                            eviction_policy="evict_last",
+                        )
+                        dq_bias += tl.dot(ds, k_bias)
+                        tl.store(
+                            dq_bias_ptrs,
+                            dq_bias,
+                            mask=(offs_m_curr[:, None] < seqlen_q) & (offs_r[None, :] < rankdim),
+                            eviction_policy="evict_last",
+                        )
         else:  # If we're parallelizing across the seqlen_k dimension
             dq = tl.dot(ds, k) * softmax_scale
-            dq_bias = tl.dot(ds, k_bias)
+            if BIAS_TYPE is not None:
+                dq_bias = tl.dot(ds, k_bias)
             if EVEN_M & EVEN_HEADDIM:  # Race condition if we just do EVEN_M
                 tl.atomic_add(dq_ptrs, dq)
             else:
@@ -759,48 +803,70 @@ def _bwd_kernel_one_col_block(
                         dq,
                         mask=(offs_m_curr[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
                     )
-            if EVEN_M & EVEN_RANKDIM:
-                tl.atomic_add(dq_bias_ptrs, dq_bias)
-            else:
-                if EVEN_RANKDIM:
-                    tl.atomic_add(dq_bias_ptrs, dq_bias, mask=offs_m_curr[:, None] < seqlen_q)
+            if BIAS_TYPE is not None:
+                if EVEN_M & EVEN_RANKDIM:
+                    tl.atomic_add(dq_bias_ptrs, dq_bias)
                 else:
-                    tl.atomic_add(
-                        dq_bias_ptrs,
-                        dq_bias,
-                        mask=(offs_m_curr[:, None] < seqlen_q) & (offs_r[None, :] < rankdim),
-                    )
+                    if EVEN_RANKDIM:
+                        tl.atomic_add(dq_bias_ptrs, dq_bias, mask=offs_m_curr[:, None] < seqlen_q)
+                    else:
+                        tl.atomic_add(
+                            dq_bias_ptrs,
+                            dq_bias,
+                            mask=(offs_m_curr[:, None] < seqlen_q) & (offs_r[None, :] < rankdim),
+                        )
             # tl.device_print("Tensor DQ_bias: ", dq_bias)
         # increment pointers
         dq_ptrs += BLOCK_M * stride_dqm
         q_ptrs += BLOCK_M * stride_qm
-        dq_bias_ptrs += BLOCK_M * stride_dq_bm
-        q_bias_ptrs += BLOCK_M * stride_q_bm
+        if BIAS_TYPE is not None:
+            dq_bias_ptrs += BLOCK_M * stride_dq_bm
+            q_bias_ptrs += BLOCK_M * stride_q_bm
         do_ptrs += BLOCK_M * stride_dom
         if MASK_TYPE == "matrix":
             m_ptrs += BLOCK_M * stride_mm
     # write-back
     dv_ptrs = DV + (offs_n[:, None] * stride_dvn + offs_d[None, :])
     dk_ptrs = DK + (offs_n[:, None] * stride_dkn + offs_d[None, :])
-    dk_bias_ptrs = DK_Bias + (offs_n[:, None] * stride_dk_bn + offs_r[None, :])
-    _bwd_store_dk_dv(
-        dk_ptrs,
-        dk_bias_ptrs,
-        dv_ptrs,
-        dk,
-        dk_bias,
-        dv,
-        offs_n,
-        offs_d,
-        offs_r,
-        seqlen_k,
-        headdim,
-        rankdim,
-        EVEN_M=EVEN_M,
-        EVEN_N=EVEN_N,
-        EVEN_HEADDIM=EVEN_HEADDIM,
-        EVEN_RANKDIM=EVEN_RANKDIM,
-    )
+    if BIAS_TYPE is not None:
+        dk_bias_ptrs = DK_Bias + (offs_n[:, None] * stride_dk_bn + offs_r[None, :])
+        _bwd_store_dk_dv_dk_bias(
+            dk_ptrs,
+            dk_bias_ptrs,
+            dv_ptrs,
+            dk,
+            dk_bias,
+            dv,
+            offs_n,
+            offs_d,
+            offs_r,
+            seqlen_k,
+            headdim,
+            rankdim,
+            EVEN_M=EVEN_M,
+            EVEN_N=EVEN_N,
+            EVEN_HEADDIM=EVEN_HEADDIM,
+            EVEN_RANKDIM=EVEN_RANKDIM,
+        )
+    else:
+        _bwd_store_dk_dv_dk_bias(
+            dk_ptrs,
+            None,
+            dv_ptrs,
+            dk,
+            None,
+            dv,
+            offs_n,
+            offs_d,
+            offs_r,
+            seqlen_k,
+            headdim,
+            rankdim,
+            EVEN_M=EVEN_M,
+            EVEN_N=EVEN_N,
+            EVEN_HEADDIM=EVEN_HEADDIM,
+            EVEN_RANKDIM=EVEN_RANKDIM,
+        )
 
 
 def init_to_zero(*names):
@@ -825,7 +891,8 @@ def init_to_zero(*names):
             for seq_parallel in [True, False]
         ],
     ],
-    key=["CACHE_KEY_SEQLEN_Q", "CACHE_KEY_SEQLEN_K", "MASK_TYPE", "IS_CAUSAL", "BLOCK_HEADDIM", "BLOCK_RANKDIM"],
+    key=["CACHE_KEY_SEQLEN_Q", "CACHE_KEY_SEQLEN_K", "MASK_TYPE", "BIAS_TYPE", "IS_CAUSAL", "BLOCK_HEADDIM",
+         "BLOCK_RANKDIM"],
 )
 @triton.heuristics(
     {
@@ -897,6 +964,7 @@ def _bwd_kernel(
         CACHE_KEY_SEQLEN_Q,
         CACHE_KEY_SEQLEN_K,
         MASK_TYPE: tl.constexpr,
+        BIAS_TYPE: tl.constexpr,
         IS_CAUSAL: tl.constexpr,
         BLOCK_HEADDIM: tl.constexpr,
         BLOCK_RANKDIM: tl.constexpr,
@@ -914,14 +982,16 @@ def _bwd_kernel(
     # offset pointers for batch/head
     Q += off_b * stride_qb + off_h * stride_qh
     K += off_b * stride_kb + off_h * stride_kh
-    Q_Bias += off_b * stride_q_bb + off_h * stride_q_bh
-    K_Bias += off_b * stride_k_bb + off_h * stride_k_bh
+    if BIAS_TYPE is not None:
+        Q_Bias += off_b * stride_q_bb + off_h * stride_q_bh
+        K_Bias += off_b * stride_k_bb + off_h * stride_k_bh
     V += off_b * stride_vb + off_h * stride_vh
     DO += off_b * stride_dob + off_h * stride_doh
     DQ += off_b * stride_dqb + off_h * stride_dqh
     DK += off_b * stride_dkb + off_h * stride_dkh
-    DQ_Bias += off_b * stride_dq_bb + off_h * stride_dq_bh
-    DK_Bias += off_b * stride_dk_bb + off_h * stride_dk_bh
+    if BIAS_TYPE is not None:
+        DQ_Bias += off_b * stride_dq_bb + off_h * stride_dq_bh
+        DK_Bias += off_b * stride_dk_bb + off_h * stride_dk_bh
     DV += off_b * stride_dvb + off_h * stride_dvh
     if MASK_TYPE != "none":
         Mask += off_b * stride_mb + off_h * stride_mh
@@ -966,6 +1036,7 @@ def _bwd_kernel(
                 rankdim,
                 ATOMIC_ADD=False,
                 MASK_TYPE=MASK_TYPE,
+                BIAS_TYPE=BIAS_TYPE,
                 IS_CAUSAL=IS_CAUSAL,
                 BLOCK_HEADDIM=BLOCK_HEADDIM,
                 BLOCK_RANKDIM=BLOCK_RANKDIM,
@@ -1013,6 +1084,7 @@ def _bwd_kernel(
             rankdim,
             ATOMIC_ADD=True,
             MASK_TYPE=MASK_TYPE,
+            BIAS_TYPE=BIAS_TYPE,
             IS_CAUSAL=IS_CAUSAL,
             BLOCK_HEADDIM=BLOCK_HEADDIM,
             BLOCK_RANKDIM=BLOCK_RANKDIM,
@@ -1055,12 +1127,16 @@ def _flash_attn_forward(q, k, v, q_bias, k_bias, mask=None, causal=False, softma
             )
         mask = mask.expand(batch, nheads, seqlen_q, seqlen_k)
     mask_strides = (mask.stride(0), mask.stride(1), mask.stride(2)) if has_mask else (0, 0, 0)
-    if q_bias is not None:
+
+    has_bias = q_bias is not None
+    if has_bias:
+        bias_type = "orthogonal"
         _, _, _, rank = q_bias.shape
         q_bias = q_bias.expand(batch, seqlen_q, nheads, rank)
         k_bias = k_bias.expand(batch, seqlen_k, nheads, rank)
         BLOCK_RANKDIM = max(triton.next_power_of_2(rank), 16)
     else:
+        bias_type = None
         rank = 0
         BLOCK_RANKDIM = 16
     q_bias_strides = (q_bias.stride(0), q_bias.stride(2), q_bias.stride(1)) if (q_bias is not None) else (0, 0, 0)
@@ -1110,6 +1186,7 @@ def _flash_attn_forward(q, k, v, q_bias, k_bias, mask=None, causal=False, softma
         # Can't use kwargs here because triton autotune expects key to be args, not kwargs
         # IS_CAUSAL=causal, BLOCK_HEADDIM=d,
         mask_type,
+        bias_type,
         causal,
         BLOCK_HEADDIM,
         BLOCK_RANKDIM,
@@ -1125,21 +1202,35 @@ def _flash_attn_backward(
         do = do.contiguous()
     batch, seqlen_q, nheads, d = q.shape
     _, seqlen_k, _, _ = k.shape
-    _, _, _, rank = q_bias.shape
     # assert d in {16, 32, 64, 128}
     assert d <= 128
     seqlen_q_rounded = math.ceil(seqlen_q / 128) * 128
     assert lse.shape == (batch, nheads, seqlen_q_rounded)
     assert q.stride(-1) == k.stride(-1) == v.stride(-1) == o.stride(-1) == 1
     assert dq.stride(-1) == dk.stride(-1) == dv.stride(-1) == 1
-    assert dq_bias.stride(-1) == dk_bias.stride(-1)
     softmax_scale = softmax_scale or 1.0 / math.sqrt(d)
     dq_accum = torch.empty_like(q, dtype=torch.float32)
-    dq_bias_accum = torch.empty_like(q_bias, dtype=torch.float32)
     delta = torch.empty_like(lse)
 
+    if q_bias is not None:
+        bias_type = "orth"
+        assert dq_bias.stride(-1) == dk_bias.stride(-1)
+        _, _, _, rank = q_bias.shape
+        dq_bias_accum = torch.empty_like(q_bias, dtype=torch.float32)
+        BLOCK_RANKDIM = max(triton.next_power_of_2(rank), 16)
+    else:
+        bias_type = None
+        dq_bias_accum = None
+        BLOCK_RANKDIM = 16
+        rank = 0
+
+    q_bias_strides = (q_bias.stride(0), q_bias.stride(2), q_bias.stride(1)) if (q_bias is not None) else (0, 0, 0)
+    k_bias_strides = (k_bias.stride(0), k_bias.stride(2), k_bias.stride(1)) if (k_bias is not None) else (0, 0, 0)
+    dq_bias_accum_strides = (q_bias.stride(0), q_bias.stride(2), q_bias.stride(1)) if (q_bias is not None) else (
+        0, 0, 0)
+    dk_bias_strides = (k_bias.stride(0), k_bias.stride(2), k_bias.stride(1)) if (k_bias is not None) else (0, 0, 0)
+
     BLOCK_HEADDIM = max(triton.next_power_of_2(d), 16)
-    BLOCK_RANKDIM = max(triton.next_power_of_2(rank), 16)
     grid = lambda META: (triton.cdiv(seqlen_q, META["BLOCK_M"]), batch * nheads)
     _bwd_preprocess_do_o_dot[grid](
         o,
@@ -1203,15 +1294,11 @@ def _flash_attn_backward(
         q.stride(0),
         q.stride(2),
         q.stride(1),
-        q_bias.stride(0),
-        q_bias.stride(2),
-        q_bias.stride(1),
+        *q_bias_strides,
         k.stride(0),
         k.stride(2),
         k.stride(1),
-        k_bias.stride(0),
-        k_bias.stride(2),
-        k_bias.stride(1),
+        *k_bias_strides,
         v.stride(0),
         v.stride(2),
         v.stride(1),
@@ -1222,15 +1309,11 @@ def _flash_attn_backward(
         dq_accum.stride(0),
         dq_accum.stride(2),
         dq_accum.stride(1),
-        dq_bias_accum.stride(0),
-        dq_bias_accum.stride(2),
-        dq_bias_accum.stride(1),
+        *dq_bias_accum_strides,
         dk.stride(0),
         dk.stride(2),
         dk.stride(1),
-        dk_bias.stride(0),
-        dk_bias.stride(2),
-        dk_bias.stride(1),
+        *dk_bias_strides,
         dv.stride(0),
         dv.stride(2),
         dv.stride(1),
@@ -1245,6 +1328,7 @@ def _flash_attn_backward(
         # Can't use kwargs here because triton autotune expects key to be args, not kwargs
         # IS_CAUSAL=causal, BLOCK_HEADDIM=d,
         mask_type,
+        bias_type,
         causal,
         BLOCK_HEADDIM=BLOCK_HEADDIM,
         BLOCK_RANKDIM=BLOCK_RANKDIM,
@@ -1254,7 +1338,8 @@ def _flash_attn_backward(
         # num_stages=1,
     )
     dq.copy_(dq_accum)
-    dq_bias.copy_(dq_bias_accum)
+    if q_bias is not None:
+        dq_bias.copy_(dq_bias_accum)
 
 
 class FlashBiasFunc(torch.autograd.Function):
@@ -1290,8 +1375,12 @@ class FlashBiasFunc(torch.autograd.Function):
             dq = torch.empty_like(q)
             dk = torch.empty_like(k)
             dv = torch.empty_like(v)
-            dq_bias = torch.empty_like(q_bias)
-            dk_bias = torch.empty_like(k_bias)
+            if q_bias is not None:
+                dq_bias = torch.empty_like(q_bias)
+                dk_bias = torch.empty_like(k_bias)
+            else:
+                dq_bias = None
+                dk_bias = None
             _flash_attn_backward(
                 do,
                 q,
