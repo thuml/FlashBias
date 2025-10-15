@@ -1,7 +1,7 @@
 # Triton Implementation of FlashBias
 This is a Triton implementation of FlashBias, which supports both forward and backward attention computation with decomposed bias terms in the following formalization:
 $$
-o=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{b})\mathbf{v}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{q}_{\text{bias}}\mathbf{k}_{\text{bias}}^\top)\mathbf{v}
+\mathbf{o}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{b})\mathbf{v}=\text{softmax}(\frac{\mathbf{q}\mathbf{k}^T}{\sqrt{C}}+\mathbf{q}_{\text{bias}}\mathbf{k}_{\text{bias}}^\top)\mathbf{v}
 $$
 
 ## Benchmark
@@ -9,13 +9,13 @@ $$
 1. Install `python=3.9, torch>=2.0.0, triton>=2.0.0, xformers`.
 2. Excute the following command for benchmarking.
 
-```python
+```bash
 python benchmark.py
 ```
 
 3. Check efficiency benchmark among
 
-- FlashBias (**Ours**)
+- Triton implementation of FlashBias (**Ours**)
 - Triton implementation of FlashAttention with Bias ([Opensource Implementation](https://github.com/pengzhangzhi/Flash-Attention-with-Bias-Triton))
 - Pytorch implementation of vanilla attention with Bias
 - Pytorch implementation of vanilla attention with Bias with Compile
@@ -24,7 +24,7 @@ python benchmark.py
 
 ## Efficiency Comparison
 
-<p><div style="display: flex; justify-content: space-between; gap: 20px;">
+<p><div style="display: flex; justify-content: space-between;">
   <div style="width: 48%; text-align: center;">
     <img src="attention-comparison-batch2-head4-d32-r8-fwd.png" alt="Forward" style="width: 100%;">
     <p>(a) Forward Efficiency.</p>
@@ -34,6 +34,7 @@ python benchmark.py
     <p>(b) Backward Efficiency.</p>
   </div>
 </div></p>
+
 ## Quick Start of FlashBias
 
 See `flash_bias_triton.py` for more details.
