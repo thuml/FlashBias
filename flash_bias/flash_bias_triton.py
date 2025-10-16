@@ -45,7 +45,7 @@ configs = [
     for BM in [32, 64, 128]
     for BN in [32, 64, 128]
     for s in ([1])
-    for w in [4]  # sometimes warp=8 may casue race condition, damage correctness
+    for w in [2, 4]  # sometimes warp=8 may casue race condition, damage correctness
 ]
 
 

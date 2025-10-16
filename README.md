@@ -17,9 +17,10 @@ This paper presents [FlashBias](https://arxiv.org/pdf/2505.12044) based on the l
 
 The following are some representative applications of FlashBias.
 
-1. **Swin Transformer V2** with relative position bias: See [./1_Vision_Transformer](https://github.com/thuml/FlashBias/tree/main/1_Vision_Transformer)
-2. **Transformer PDE Solver** with spatial distance bias: See [./2_Neual_Solver](https://github.com/thuml/FlashBias/tree/main/2_Neural_Solver)
-3. **AlphaFold 3** with pair representation bias: Coming soon (this week).
+1. **Large language model** with ALiBi bias: See [./0_Language_Model](https://github.com/thuml/FlashBias/tree/main/0_Language_Model)
+2. **Swin Transformer V2** with relative position bias: See [./1_Vision_Transformer](https://github.com/thuml/FlashBias/tree/main/1_Vision_Transformer)
+3. **Transformer PDE Solver** with spatial distance bias: See [./2_Neual_Solver](https://github.com/thuml/FlashBias/tree/main/2_Neural_Solver)
+4. **AlphaFold 3** with pair representation bias: Coming soon (this week).
 
 ## Overall Comparison
 

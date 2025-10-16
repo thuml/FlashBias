@@ -45,10 +45,10 @@ def test_attention_correctness():
     o_flashbias = flashbias_triton(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(),
                                   k_bias.permute(0, 2, 1, 3).contiguous(), None, causal, softmax_scale)
     o_triton = attention_triton(q, k, v, bias, causal, softmax_scale)
-    o_torch = attention_torch(q, k, v, softmax_scale, bias)
-    o_torch_compile = attention_torch_compile(q, k, v, softmax_scale, bias)
-    o_xformers = attention_xformers(q, k, v, softmax_scale, bias)
-    o_sdpa = attention_sdpa(q, k, v, softmax_scale, bias)
+    o_torch = attention_torch(q, k, v, softmax_scale, bias, causal)
+    o_torch_compile = attention_torch_compile(q, k, v, softmax_scale, bias, causal)
+    o_xformers = attention_xformers(q, k, v, softmax_scale, bias, causal)
+    o_sdpa = attention_sdpa(q, k, v, softmax_scale, bias, causal)
 
     # Compute max forward errors
     max_forward_error_triton = torch.abs(o_flashbias - o_triton).max().item()
@@ -192,7 +192,7 @@ def test_attention_correctness():
 
 
 @triton.testing.perf_report(benchmark_configs)
-def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, mode, provider, device="cuda"):
+def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, CAUSAL, mode, provider, device="cuda"):
     dtype = torch.float16
     # Initialize tensors with same shape ordering as test_attention_correctness
     q = torch.randn((BATCH, len, H, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
@@ -207,7 +207,7 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, mode, provider
 
     def forward_backward_flashbias():
         out = flashbias_triton(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(), k_bias.permute(0, 2, 1, 3).contiguous(),
-                              None, False, sm_scale)
+                              None, CAUSAL, sm_scale)
         loss = (0 - out.sum())
         loss.backward()
         torch.cuda.synchronize()
@@ -219,7 +219,7 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, mode, provider
         k_bias.grad = None
 
     def forward_backward_triton():
-        out = attention_triton(q, k, v, bias, False, sm_scale)
+        out = attention_triton(q, k, v, bias, CAUSAL, sm_scale)
         loss = (0 - out.sum())
         loss.backward()
         torch.cuda.synchronize()
@@ -230,7 +230,7 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, mode, provider
         bias.grad = None
 
     def forward_backward_torch():
-        out = attention_torch(q, k, v, sm_scale, bias)
+        out = attention_torch(q, k, v, sm_scale, bias, CAUSAL)
         loss = (0 - out.sum())
         loss.backward()
         torch.cuda.synchronize()
@@ -241,7 +241,7 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, mode, provider
         bias.grad = None
 
     def forward_backward_torch_compile():
-        out = attention_torch_compile(q, k, v, sm_scale, bias)
+        out = attention_torch_compile(q, k, v, sm_scale, bias, CAUSAL)
         loss = (0 - out.sum())
         loss.backward()
         torch.cuda.synchronize()
@@ -252,7 +252,7 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, mode, provider
         bias.grad = None
 
     def forward_backward_xformers():
-        out = attention_xformers(q, k, v, sm_scale, bias)
+        out = attention_xformers(q, k, v, sm_scale, bias, CAUSAL)
         loss = (0 - out.sum())
         loss.backward()
         torch.cuda.synchronize()
@@ -263,7 +263,7 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, mode, provider
         bias.grad = None
 
     def forward_backward_sdpa():
-        out = attention_sdpa(q, k, v, sm_scale, bias)
+        out = attention_sdpa(q, k, v, sm_scale, bias, CAUSAL)
         loss = (0 - out.sum())
         loss.backward()
         torch.cuda.synchronize()
@@ -276,17 +276,17 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, mode, provider
     if mode == "fwd":
         if provider == "triton-flash-bias":
             fn = lambda: flashbias_triton(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(),
-                                         k_bias.permute(0, 2, 1, 3).contiguous(), None, False, sm_scale)
+                                         k_bias.permute(0, 2, 1, 3).contiguous(), None, CAUSAL, sm_scale)
         elif provider == "triton-attn-bias":
-            fn = lambda: attention_triton(q, k, v, bias, False, sm_scale)
+            fn = lambda: attention_triton(q, k, v, bias, CAUSAL, sm_scale)
         elif provider == "torch-attn-bias":
-            fn = lambda: attention_torch(q, k, v, sm_scale, bias)
+            fn = lambda: attention_torch(q, k, v, sm_scale, bias, CAUSAL)
         elif provider == "torch-compile-attn-bias":
-            fn = lambda: attention_torch_compile(q, k, v, sm_scale, bias)
+            fn = lambda: attention_torch_compile(q, k, v, sm_scale, bias, CAUSAL)
         elif provider == "xformers-attn-bias":
-            fn = lambda: attention_xformers(q, k, v, sm_scale, bias)
+            fn = lambda: attention_xformers(q, k, v, sm_scale, bias, CAUSAL)
         elif provider == "torch-sdpa":
-            fn = lambda: attention_sdpa(q, k, v, sm_scale, bias)
+            fn = lambda: attention_sdpa(q, k, v, sm_scale, bias, CAUSAL)
         else:
             raise Exception("Invalid provider \"{}\"".format(provider))
     elif mode == "bwd":

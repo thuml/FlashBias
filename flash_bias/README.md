@@ -8,10 +8,13 @@ $$
 ## Benchmark
 
 1. Install `python=3.9, torch>=2.0.0, triton>=2.0.0, xformers`.
+
+**Important notice !!! ** (1) Since the backward pass of Triton kernel may cause a race condition due to the Triton compiler, we suggest you **configure `triton=3.0.0`**, which has been tested as correct. (2) Usually, reduce the `num_warps` can avoid the race condition.
+
 2. Execute the following command for benchmarking.
 
 ```bash
-python benchmark.py
+python benchmark_alibi_gpt2.py
 ```
 
 3. Check the efficiency benchmark among

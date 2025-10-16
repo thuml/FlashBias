@@ -9,7 +9,7 @@ Refactor from the original project from [https://github.com/pengzhangzhi]
 import triton
 
 # Benchmarking configuration
-BATCH, N_HEADS, HEAD_DIM, RANK_DIM = 2, 4, 32, 8  # Aligned with test_attention_correctness
+BATCH, N_HEADS, HEAD_DIM, RANK_DIM, CAUSAL = 2, 4, 32, 8, False  # Aligned with test_attention_correctness
 
 benchmark_configs = [
     triton.testing.Benchmark(
@@ -42,12 +42,13 @@ benchmark_configs = [
         ],
         ylabel="Speed (TFLOPS/s)",
         xlabel="Sequence Length",
-        plot_name=f"attention-comparison-batch{BATCH}-head{N_HEADS}-d{HEAD_DIM}-r{RANK_DIM}-{mode}",
+        plot_name=f"attention-comparison-batch{BATCH}-head{N_HEADS}-d{HEAD_DIM}-r{RANK_DIM}-causal{CAUSAL}-{mode}",
         args={
             "H": N_HEADS,
             "BATCH": BATCH,
             "HEAD_DIM": HEAD_DIM,
             "RANK_DIM": RANK_DIM,
+            "CAUSAL": CAUSAL,
             "mode": mode,
         },
     )
