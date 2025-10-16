@@ -13,7 +13,7 @@ This paper presents [FlashBias](https://arxiv.org/pdf/2505.12044) based on the l
 
 ## Get Started
 
-**Check [./flash_bias](https://github.com/thuml/FlashBias/tree/main/flash_bias) for Triton kernel.**
+**Check [./flash_bias](https://github.com/thuml/FlashBias/tree/main/flash_bias) for Triton kernel and comparison among FlashBias, FlashAttention, torch-complie, SDPA and xFormers.**
 
 The following are some representative applications of FlashBias.
 
@@ -21,6 +21,13 @@ The following are some representative applications of FlashBias.
 2. **Swin Transformer V2** with relative position bias: See [./1_Vision_Transformer](https://github.com/thuml/FlashBias/tree/main/1_Vision_Transformer)
 3. **Transformer PDE Solver** with spatial distance bias: See [./2_Neual_Solver](https://github.com/thuml/FlashBias/tree/main/2_Neural_Solver)
 4. **AlphaFold 3** with pair representation bias: Coming soon (this week).
+
+## Usage
+
+```python
+from flash_bias_triton import flash_bias_func
+output_flash = flash_bias_func(q, k, v, q_bias, k_bias, None, False, 1 / np.sqrt(headdim))
+```
 
 ## Overall Comparison
 
