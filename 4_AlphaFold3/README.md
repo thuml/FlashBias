@@ -9,6 +9,7 @@ FlashBias can be used to accelerate Pairformer in [AlphaFold 3 (Nature)](https:/
 <br><br>
 <b>Figure 1.</b> Neural decomposition uses lightweight neural networks to approximate the bias term.
 </p>
+
 ## Get Started
 
 This part is modified from [Protenix](https://github.com/bytedance/Protenix).
@@ -26,15 +27,15 @@ wget -P /data/af3-dev/release_model/ https://af3-dev.tos-cn-beijing.volces.com/r
 bash finetune_demo_flashbias.sh # Finetune Flashbias factor functions.
 ```
 
-Check ./protenix/openfold_local/model/triangular_attention.py for our modifications.
+Check [./protenix/openfold_local/model/triangular_attention.py](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/triangular_attention.py) for our modifications.
 
 Alternatively, you can skip this step and use our fine-tuned model (coming soon).
 
 3. Inference with FlashBias
 
-You can find several examples in this fold ./examples
+You can find several examples in this fold [./examples](https://github.com/thuml/FlashBias/tree/main/4_AlphaFold3/examples)
 
-Please check ./configs/configs_inference.py for inference configuration and modify `code_directory` to your finetuned flashbias model path.
+Please check [./configs/configs_inference.py](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/configs/configs_inference.py) for inference configuration and modify `code_directory` to your finetuned flashbias model path.
 
 ```bash
 bash inference_demo_flashbias.sh # Inference with ID: 7wux
@@ -61,17 +62,18 @@ bash eval_demo_flashbias.sh # evaluation on recentPDB_1536_sample384_0925
 <br><br>
 <b>Figure 2.</b> Visualization and efficiency comparison in protein-folding.
 </p>
+
 ## Project Guidance
 
 Since [Protenix](https://github.com/bytedance/Protenix) is a large project, we provide some guidance here for a quick start.
 
 To ensure the fine-tuning and inference with FlashBias, we have modified the following files in sequence:
 
-- ./runner/train_flashbias.py (Line 423): Catch and optimize the approximation loss. 
-- ./protenix/model/protenix.py (Line 250): Convey initial feature s_inputs to Pairformer to estimate the decomposed factor tensors.
-- ./protenix/model/modules/pairformer.py (Line 138, Line 151, Line 258): Convey s_input and the id of layers into the TriangleAttention.
-- ./protenix/openfold_local/model/triangular_attention.py (Lines 152-195): Adopt neural networks to generate decomposed factor tensors.
-- ./protenix/openfold_local/model/primitives.py (Lines 605-643): Adopt flash_bias_triton.py for speed up.
+- [./runner/train_flashbias.py (Line 423)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/runner/train_flashbias.py#L423): Catch and optimize the approximation loss. 
+- [./protenix/model/protenix.py (Line 250)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/model/protenix.py#L250): Convey initial feature s_inputs to Pairformer to estimate the decomposed factor tensors.
+- [./protenix/model/modules/pairformer.py (Line 138, Line 151, Line 258)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/model/modules/pairformer.py#L151): Convey s_input and the id of layers into the TriangleAttention.
+- [./protenix/openfold_local/model/triangular_attention.py (Lines 152-195)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/triangular_attention.py#L148): Adopt neural networks to generate decomposed factor tensors.
+- [./protenix/openfold_local/model/primitives.py (Lines 605-643)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/primitives.py#L605): Adopt [flash_bias_triton.py](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/flash_bias_triton.py) for speed up.
 
 ## Citation
 
