@@ -9,34 +9,34 @@ Refactor from the original project from [https://github.com/pengzhangzhi]
 import triton
 
 # Benchmarking configuration
-BATCH, N_HEADS, HEAD_DIM, RANK_DIM, CAUSAL = 2, 4, 32, 8, False  # Aligned with test_attention_correctness
+BATCH, N_HEADS, HEAD_DIM, RANK_DIM, CAUSAL = 1, 50, 32, 2, True # 2, 4, 32, 8, False  # Aligned with test_attention_correctness
 
 benchmark_configs = [
     triton.testing.Benchmark(
         x_names=["len"],
-        x_vals=list(2 ** i for i in range(8, 15)),
+        x_vals=list(2 ** i for i in range(8, 14)),
         line_arg="provider",
         line_vals=[
             "triton-flash-bias",
-            "triton-attn-bias",
-            "torch-attn-bias",
-            "torch-compile-attn-bias",
+            # "triton-attn-bias",
+            # "torch-attn-bias",
+            # "torch-compile-attn-bias",
             "xformers-attn-bias",
             "torch-sdpa"
         ],
         line_names=[
             "Triton-flash-bias",
-            "Triton-Attn-Bias",
-            "PyTorch-Attn-Bias",
-            "PyTorch-Compile-Attn-Bias",
+            # "Triton-Attn-Bias",
+            # "PyTorch-Attn-Bias",
+            # "PyTorch-Compile-Attn-Bias",
             "xFormers-Attn-Bias",
             "PyTorch-SDPA"
         ],
         styles=[
             ("red", "-"),
-            ("pink", "-"),
-            ("blue", "--"),
-            ("cyan", "-."),
+            # ("pink", "-"),
+            # ("blue", "--"),
+            # ("cyan", "-."),
             ("orange", "-."),
             ("green", ":")
         ],

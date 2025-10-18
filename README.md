@@ -17,10 +17,16 @@ This paper presents [FlashBias](https://arxiv.org/pdf/2505.12044) based on the l
 
 The following are some representative applications of FlashBias.
 
-1. **Large language model** with ALiBi bias: See [./0_Language_Model](https://github.com/thuml/FlashBias/tree/main/0_Language_Model)
-2. **Swin Transformer V2** with relative position bias: See [./1_Vision_Transformer](https://github.com/thuml/FlashBias/tree/main/1_Vision_Transformer)
-3. **Transformer PDE Solver** with spatial distance bias: See [./2_Neual_Solver](https://github.com/thuml/FlashBias/tree/main/2_Neural_Solver)
-4. **AlphaFold 3** with pair representation bias: Coming soon (this week).
+1. **Large language model** with ALiBi bias: See [./1_Language_Model](https://github.com/thuml/FlashBias/tree/main/1_Language_Model)
+2. **Swin Transformer V2** with relative position bias: See [./2_Vision_Transformer](https://github.com/thuml/FlashBias/tree/main/2_Vision_Transformer)
+3. **Transformer PDE Solver** with spatial distance bias: See [./3_Neual_Solver](https://github.com/thuml/FlashBias/tree/main/3_Neural_Solver)
+4. **AlphaFold 3** with pair representation bias: [./4_AlphaFold3](https://github.com/thuml/FlashBias/tree/main/4_AlphaFold3)
+
+<p align="center">
+<img src=".\pic\features.png" height = "200" alt="" align=center />
+<br><br>
+<b>Figure 2.</b> Three types of implementations for FlashBias and corresponding representative applications.
+</p>
 
 ## Usage
 
@@ -34,10 +40,11 @@ output_flash = flash_bias_func(q, k, v, q_bias, k_bias, None, False, 1 / np.sqrt
 A significant memory and running time reduction compared to vanilla FlashAttention.
 
 <p align="center">
-<img src=".\pic\efficiency.png" height = "250" alt="" align=center />
+<img src=".\pic\efficiency.png" height = "220" alt="" align=center />
 <br><br>
-<b>Figure 2.</b> Efficiency comparison with vanilla FlashAttention.
+<b>Figure 3.</b> Efficiency comparison with vanilla FlashAttention.
 </p>
+
 ## Citation
 
 If you find this repo useful, please cite our paper. 

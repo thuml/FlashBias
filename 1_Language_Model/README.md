@@ -33,7 +33,7 @@ cd ../flash_bias
 python benchmark.py
 ```
 
-## Efficiency Comparison 
+## Efficiency Comparison
 
 Note that vanilla flash_attn_triton is unstable during the backward pass phase when the sequence length is 8192. Our FlashBias and all the other kernels are correct across all input lengths.
 
