@@ -29,11 +29,11 @@ bash finetune_demo_flashbias.sh # Finetune Flashbias factor functions.
 
 Check [./protenix/openfold_local/model/triangular_attention.py](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/triangular_attention.py) for our modifications.
 
-Alternatively, you can skip this step and use our fine-tuned model (coming soon).
+Alternatively, you can skip this step and use our fine-tuned model [[Google Drive]](https://drive.google.com/drive/folders/12mdeQEnhNziJUc5LdmW6ZjfJWCp4Sjnw?usp=sharing).
 
 3. Inference with FlashBias
 
-You can find several examples in this fold [./examples](https://github.com/thuml/FlashBias/tree/main/4_AlphaFold3/examples)
+You can find several examples in this folder [./examples](https://github.com/thuml/FlashBias/tree/main/4_AlphaFold3/examples)
 
 Please check [./configs/configs_inference.py](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/configs/configs_inference.py) for inference configuration and modify `code_directory` to your finetuned flashbias model path.
 
