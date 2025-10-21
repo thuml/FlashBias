@@ -72,8 +72,8 @@ To ensure the fine-tuning and inference with FlashBias, we have modified the fol
 - [./runner/train_flashbias.py (Line 423)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/runner/train_flashbias.py#L423): Catch and optimize the approximation loss. 
 - [./protenix/model/protenix.py (Line 250)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/model/protenix.py#L250): Convey initial feature s_inputs to Pairformer to estimate the decomposed factor tensors.
 - [./protenix/model/modules/pairformer.py (Line 138, Line 151, Line 258)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/model/modules/pairformer.py#L151): Convey s_input and the id of layers into the TriangleAttention.
-- [./protenix/openfold_local/model/triangular_attention.py (Lines 152-195)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/triangular_attention.py#L148): Adopt neural networks to generate decomposed factor tensors.
-- [./protenix/openfold_local/model/primitives.py (Lines 605-643)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/primitives.py#L605): Adopt [flash_bias_triton.py](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/flash_bias_triton.py) for speed up.
+- [./protenix/openfold_local/model/triangular_attention.py (Lines 154-196)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/triangular_attention.py#L153): Adopt neural networks to generate decomposed factor tensors.
+- [./protenix/openfold_local/model/primitives.py (Lines 634-669)](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/primitives.py#L634): Adopt [flash_bias_triton.py](https://github.com/thuml/FlashBias/blob/main/4_AlphaFold3/protenix/openfold_local/model/flash_bias_triton.py) for speed up.
 
 ## Citation
 
