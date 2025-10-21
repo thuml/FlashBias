@@ -29,7 +29,7 @@ python benchmark_alibi_gpt2.py
 
 ## Efficiency Comparison
 
-We suggest to use [Triton-based FlashBias](https://github.com/thuml/FlashBias/blob/main/flash_bias/flash_bias_triton.py) in inference and [PyTorch-SDPA-based FlashBias](https://github.com/thuml/FlashBias/blob/main/flash_bias/attention_func.py) for training.
+We suggest to use [Triton-based FlashBias](https://github.com/thuml/FlashBias/blob/main/flash_bias/flash_bias_triton.py) in inference and [PyTorch-SDPA-based FlashBias](https://github.com/thuml/FlashBias/blob/main/flash_bias/attention_func.py#L188) for training.
 
 <p align="center">
 <img src=".\attention-comparison-batch2-head4-d32-r8-causalFalse-fwd.png" height = "250" alt="" align=center />
