@@ -301,20 +301,15 @@ def _attention(
     # [*, H, Q, K]
     a = torch.matmul(query, key)
 
-    sum_bias = torch.zeros_like(a).to(a.device)
     for b in biases:
-        sum_bias += b
-    attn = a + sum_bias
-    # print(attn.dtype)
-    a = softmax_no_cast(attn, -1)
-    with torch.cuda.amp.autocast(enabled=False):
-        a_double_check = torch.softmax(attn, -1)
-    # print(torch.sum(torch.abs(a - a_double_check)))
+        a += b
+
+    a = softmax_no_cast(a, -1)
 
     # [*, H, Q, C_hidden]
     a = torch.matmul(a, value)
 
-    return a, sum_bias
+    return a
 
 
 @torch.jit.ignore
@@ -596,32 +591,63 @@ class Attention(nn.Module):
         if sum(attn_options) > 1:
             raise ValueError("Choose at most one alternative attention algorithm")
 
-        if biases is None:
-            biases = []
-
         # DeepSpeed attention kernel applies scaling internally
         q, k, v = self._prep_qkv(q_x, kv_x, apply_scale=not use_deepspeed_evo_attention)
 
+        # # # ======================Original Attention======================
+        # if biases is None:
+        #     biases = []
+        # if is_fp16_enabled():
+        #     use_memory_efficient_kernel = False
+        #
+        # if use_memory_efficient_kernel:
+        #     raise Exception(f"use_memory_efficient_kernel=True not supported!!!")
+        # elif use_deepspeed_evo_attention:
+        #     if len(biases) > 2:
+        #         raise ValueError(
+        #             "If use_deepspeed_evo_attention is True, you may only "
+        #             "provide up to two bias terms"
+        #         )
+        #     o = _deepspeed_evo_attn(q, k, v, biases)
+        # elif use_lma:
+        #     biases = [
+        #         b.expand(b.shape[:-2] + (q_x.shape[-2],) + (kv_x.shape[-2],))
+        #         for b in biases
+        #     ]
+        #     o = _lma(q, k, v, biases, lma_q_chunk_size, lma_kv_chunk_size)
+        #     o = o.transpose(-2, -3)
+        # elif use_flash:
+        #     o = _flash_attn(q, k, v, flash_mask)
+        # else:
+        #     o = _attention(q, k, v, biases)
+        #     o = o.transpose(-2, -3)
+        #     # k = permute_final_dims(k, (1, 0))
+        #     # a = torch.matmul(q, k)
+        #     # for b in biases:
+        #     #     a += b
+        #     # with torch.cuda.amp.autocast(enabled=False):
+        #     #     a = torch.nn.functional.softmax(a, dim=-1)
+        #     # # [*, H, Q, C_hidden]
+        #     # o = torch.matmul(a, v)
+        #     # o = o.transpose(-2, -3)
+
         # # ======================FlashBias based on Triton Kernel======================
         if q_bias is not None and k_bias is not None:
-            if len(q_bias.shape) == 1 and len(k_bias.shape) == 1:
-                o = F.scaled_dot_product_attention(q, k, v, scale=1)
+            o = flash_bias_func(q.permute(0, 2, 1, 3).contiguous().half(),
+                                k.permute(0, 2, 1, 3).contiguous().half(),
+                                v.permute(0, 2, 1, 3).contiguous().half(),
+                                q_bias.permute(0, 2, 1, 3).contiguous().half(),
+                                k_bias.permute(0, 2, 1, 3).contiguous().half(),
+                                None,
+                                False,
+                                1)
+        else:
+            if biases is not None:
+                o = F.scaled_dot_product_attention(q, k, v, attn_mask=biases[0], scale=1)
                 o = o.transpose(-2, -3)
             else:
-                o = flash_bias_func(q.permute(0, 2, 1, 3).contiguous().half(),
-                                    k.permute(0, 2, 1, 3).contiguous().half(),
-                                    v.permute(0, 2, 1, 3).contiguous().half(),
-                                    q_bias.permute(0, 2, 1, 3).contiguous().half(),
-                                    k_bias.permute(0, 2, 1, 3).contiguous().half(),
-                                    None,
-                                    False,
-                                    1)
-        else:
-            attn_mask = 0
-            for b in biases:
-                attn_mask += b.repeat(q.shape[0] // b.shape[0], q.shape[1] // b.shape[1], q.shape[2] // b.shape[2], 1)
-            o = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, scale=1)
-            o = o.transpose(-2, -3)
+                o = F.scaled_dot_product_attention(q, k, v, scale=1)
+                o = o.transpose(-2, -3)
 
         # # ======================FlashBias based on SDPA======================
         # if q_bias is not None and k_bias is not None:

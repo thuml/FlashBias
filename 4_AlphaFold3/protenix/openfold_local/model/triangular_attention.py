@@ -18,7 +18,6 @@ from typing import Optional, List
 import numpy as np
 import torch
 import torch.nn as nn
-import time
 from protenix.metrics.rmsd import self_aligned_rmsd
 from protenix.openfold_local.model.primitives import Linear, LayerNorm, Attention
 from protenix.openfold_local.utils.chunk_utils import chunk_layer
@@ -82,7 +81,7 @@ class TriangleAttention(nn.Module):
             inplace_safe: bool = False,
     ) -> torch.Tensor:
         "triangle! triangle!"
-        if q_bias is not None and k_bias is not None:
+        if q_bias is not None and k_bias is not None and biases is not None:
             mha_inputs = {
                 "q_x": x,
                 "kv_x": x,
@@ -90,11 +89,23 @@ class TriangleAttention(nn.Module):
                 'q_bias': q_bias,
                 'k_bias': k_bias,
             }
-        else:
+        elif q_bias is not None and k_bias is not None:
+            mha_inputs = {
+                "q_x": x,
+                "kv_x": x,
+                'q_bias': q_bias,
+                'k_bias': k_bias,
+            }
+        elif biases is not None:
             mha_inputs = {
                 "q_x": x,
                 "kv_x": x,
                 "biases": biases,
+            }
+        else:
+            mha_inputs = {
+                "q_x": x,
+                "kv_x": x,
             }
 
         return chunk_layer(
@@ -130,20 +141,14 @@ class TriangleAttention(nn.Module):
             [*, I, J, C_in] output tensor
         """
         # [*, I, J]
-        mask = x.new_ones(
-            x.shape[:-1],
-        )
 
         if not self.starting:
             x = x.transpose(-2, -3)
-            mask = mask.transpose(-1, -2)
 
         # [*, I, J, C_in]
         x = self.layer_norm(x)
         N = x.shape[0]
         C = x.shape[-1]
-        # [*, I, 1, 1, J]
-        mask_bias = (self.inf * (mask - 1))[..., :, None, None, :]
 
         ###### for flashbias ######
         if self.training:
@@ -158,7 +163,7 @@ class TriangleAttention(nn.Module):
                     .reshape(N, self.no_heads, self.Rank).permute(1, 0, 2).unsqueeze(0)  # N 128
                 k_bias = self.linear_k_flashbias(torch.concat([x.mean(0), s_inputs], dim=-1)) \
                     .reshape(N, self.no_heads, self.Rank).permute(1, 0, 2).unsqueeze(0)  # N 128
-                biases = [mask_bias]
+                biases = None
                 triangle_bias_low_rank = q_bias @ k_bias.transpose(-1, -2)
                 finetune_loss = torch.mean((triangle_bias_low_rank - triangle_bias) ** 2)
             else:
@@ -167,7 +172,7 @@ class TriangleAttention(nn.Module):
                 # [*, 1, H, I, J]
                 triangle_bias = triangle_bias.unsqueeze(-4)
                 finetune_loss = 0
-                biases = [mask_bias, triangle_bias]
+                biases = [triangle_bias]
                 q_bias = None
                 k_bias = None
         else:
@@ -178,7 +183,7 @@ class TriangleAttention(nn.Module):
                 k_bias = self.linear_k_flashbias(torch.concat([x.mean(0), s_inputs], dim=-1)) \
                     .reshape(N, self.no_heads, self.Rank).permute(1, 0, 2).unsqueeze(0)  # N 128
                 finetune_loss = 0
-                biases = [mask_bias]
+                biases = None
             else:
                 # [*, H, I, J]
                 ###### for original attention
@@ -188,7 +193,7 @@ class TriangleAttention(nn.Module):
                 finetune_loss = 0
                 q_bias = None
                 k_bias = None
-                biases = [mask_bias, triangle_bias]
+                biases = [triangle_bias]
 
         if chunk_size is not None:
             x = self._chunk(
