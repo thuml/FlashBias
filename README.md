@@ -3,7 +3,7 @@ FlashBias: Fast Computation of Attention with Bias [[Paper]](https://arxiv.org/p
 
 Attention with bias widely exists, such as relative position encoding in [Swin Transformer](https://github.com/microsoft/Swin-Transformer), scientific prior encoding in [AlphaFold (Nature 2024)](https://www.nature.com/articles/s41586-024-07487-w) and [Pangu-Weather (Nature 2023)](https://www.nature.com/articles/s41586-023-06185-3). Surprisingly, despite the common use of attention with bias, its targeted efficiency optimization remains absent.
 
-This paper presents [FlashBias](https://arxiv.org/pdf/2505.12044) based on the low-rank compressed sensing theory, which can provide fast-exact computation for many widely used attention biases, enabling 1.5× speedup for AlphaFold, and over 2× speedup for attention with bias in vision and language models without loss of accuracy.
+This paper presents [FlashBias](https://arxiv.org/pdf/2505.12044) based on the low-rank compressed sensing theory, which can provide fast-exact computation for many widely used attention biases, enabling 1.5× speedup for Pairformer in AlphaFold 3, and over 2× speedup for attention with bias in vision and language models without loss of accuracy.
 
 <p align="center">
 <img src=".\pic\flashbias.png" height = "250" alt="" align=center />
