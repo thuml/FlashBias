@@ -10,6 +10,7 @@ import triton
 from config import benchmark_configs
 from attention_func import (
     flashbias_triton,
+    flashbias_sdpa,
     attention_triton,
     attention_torch,
     attention_torch_compile,
@@ -43,12 +44,14 @@ def test_attention_correctness():
 
     # Compute outputs
     o_flashbias = flashbias_triton(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(),
-                                  k_bias.permute(0, 2, 1, 3).contiguous(), None, causal, softmax_scale)
+                                   k_bias.permute(0, 2, 1, 3).contiguous(), None, causal, softmax_scale)
     o_triton = attention_triton(q, k, v, bias, causal, softmax_scale)
     o_torch = attention_torch(q, k, v, softmax_scale, bias, causal)
     o_torch_compile = attention_torch_compile(q, k, v, softmax_scale, bias, causal)
     o_xformers = attention_xformers(q, k, v, softmax_scale, bias, causal)
     o_sdpa = attention_sdpa(q, k, v, softmax_scale, bias, causal)
+    o_flashbias_sdpa = flashbias_sdpa(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(),
+                                      k_bias.permute(0, 2, 1, 3).contiguous(), softmax_scale, None, causal)
 
     # Compute max forward errors
     max_forward_error_triton = torch.abs(o_flashbias - o_triton).max().item()
@@ -56,6 +59,7 @@ def test_attention_correctness():
     max_forward_error_torch_compile = torch.abs(o_flashbias - o_torch_compile).max().item()
     max_forward_error_xformers = torch.abs(o_flashbias - o_xformers).max().item()
     max_forward_error_sdpa = torch.abs(o_flashbias - o_sdpa).max().item()
+    max_forward_error_flashbias_sdpa = torch.abs(o_flashbias - o_flashbias_sdpa).max().item()
 
     # Compute loss and backpropagate for flash attention
     loss_flashbias = (0 - o_flashbias.sum())
@@ -118,6 +122,12 @@ def test_attention_correctness():
     dq_bias_sdpa = dbias_sdpa @ k_bias
     dk_bias_sdpa = dbias_sdpa.transpose(-2, -1) @ q_bias
 
+    # Compute loss and backpropagate for FlashBias SDPA
+    loss_flashbias_sdpa = (0 - o_flashbias_sdpa.sum())
+    loss_flashbias_sdpa.backward()
+    dq_flashbias_sdpa, dk_flashbias_sdpa, dv_flashbias_sdpa, dq_bias_flashbias_sdpa, dk_bias_flashbias_sdpa = [
+        x.grad.clone() for x in [q, k, v, q_bias, k_bias]]
+
     # Compute max gradient errors against triton implementation
     max_grad_errors_triton = {
         "q": torch.abs(dq_flash - dq_triton).max().item(),
@@ -163,12 +173,22 @@ def test_attention_correctness():
         "k_bias": torch.abs(dk_bias_flash - dk_bias_sdpa).max().item(),
     }
 
+    # Compute max gradient errors against SDPA implementation
+    max_grad_errors_flashbias_sdpa = {
+        "q": torch.abs(dq_flash - dq_flashbias_sdpa).max().item(),
+        "k": torch.abs(dk_flash - dk_flashbias_sdpa).max().item(),
+        "v": torch.abs(dv_flash - dv_flashbias_sdpa).max().item(),
+        "q_bias": torch.abs(dq_bias_flash - dq_bias_flashbias_sdpa).max().item(),
+        "k_bias": torch.abs(dk_bias_flash - dk_bias_flashbias_sdpa).max().item(),
+    }
+
     # Print max errors
     print(f"✅ Max Forward Error vs Triton: {max_forward_error_triton:.6e}")
     print(f"✅ Max Forward Error vs Torch: {max_forward_error_torch:.6e}")
     print(f"✅ Max Forward Error vs Torch Compile: {max_forward_error_torch_compile:.6e}")
     print(f"✅ Max Forward Error vs xFormers: {max_forward_error_xformers:.6e}")
     print(f"✅ Max Forward Error vs SDPA: {max_forward_error_sdpa:.6e}")
+    print(f"✅ Max Forward Error vs FlashBias SDPA: {max_forward_error_flashbias_sdpa:.6e}")
 
     print(f"✅ Max Gradient Errors vs Triton:")
     for param, err in max_grad_errors_triton.items():
@@ -190,6 +210,10 @@ def test_attention_correctness():
     for param, err in max_grad_errors_sdpa.items():
         print(f"   {param.upper()} : {err:.6e}")
 
+    print(f"✅ Max Gradient Errors vs FlashBias SDPA:")
+    for param, err in max_grad_errors_flashbias_sdpa.items():
+        print(f"   {param.upper()} : {err:.6e}")
+
 
 @triton.testing.perf_report(benchmark_configs)
 def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, CAUSAL, mode, provider, device="cuda"):
@@ -206,8 +230,9 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, CAUSAL, mode, 
     sm_scale = 1.0 / math.sqrt(HEAD_DIM)
 
     def forward_backward_flashbias():
-        out = flashbias_triton(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(), k_bias.permute(0, 2, 1, 3).contiguous(),
-                              None, CAUSAL, sm_scale)
+        out = flashbias_triton(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(),
+                               k_bias.permute(0, 2, 1, 3).contiguous(),
+                               None, CAUSAL, sm_scale)
         loss = (0 - out.sum())
         loss.backward()
         torch.cuda.synchronize()
@@ -273,10 +298,26 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, CAUSAL, mode, 
         v.grad = None
         bias.grad = None
 
+    def forward_backward_flashbias_sdpa():
+        out = flashbias_sdpa(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(),
+                               k_bias.permute(0, 2, 1, 3).contiguous(), sm_scale, None, CAUSAL)
+        loss = (0 - out.sum())
+        loss.backward()
+        torch.cuda.synchronize()
+        # Reset gradients for next iteration
+        q.grad = None
+        k.grad = None
+        v.grad = None
+        q_bias.grad = None
+        k_bias.grad = None
+
     if mode == "fwd":
         if provider == "triton-flash-bias":
             fn = lambda: flashbias_triton(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(),
-                                         k_bias.permute(0, 2, 1, 3).contiguous(), None, CAUSAL, sm_scale)
+                                          k_bias.permute(0, 2, 1, 3).contiguous(), None, CAUSAL, sm_scale)
+        elif provider == "sdpa-flash-bias":
+            fn = lambda: flashbias_sdpa(q, k, v, q_bias.permute(0, 2, 1, 3).contiguous(),
+                                          k_bias.permute(0, 2, 1, 3).contiguous(), sm_scale,None, CAUSAL)
         elif provider == "triton-attn-bias":
             fn = lambda: attention_triton(q, k, v, bias, CAUSAL, sm_scale)
         elif provider == "torch-attn-bias":
@@ -292,6 +333,8 @@ def bench_attention_comparison(BATCH, H, len, HEAD_DIM, RANK_DIM, CAUSAL, mode, 
     elif mode == "bwd":
         if provider == "triton-flash-bias":
             fn = forward_backward_flashbias
+        elif provider == "sdpa-flash-bias":
+            fn = forward_backward_flashbias_sdpa
         elif provider == "triton-attn-bias":
             fn = forward_backward_triton
         elif provider == "torch-attn-bias":

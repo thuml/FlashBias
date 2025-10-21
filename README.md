@@ -31,8 +31,22 @@ The following are some representative applications of FlashBias.
 ## Usage
 
 ```python
+## Triton-based FlashBias, See `flash_bias_triton.py` for more details.
 from flash_bias_triton import flash_bias_func
 output_flash = flash_bias_func(q, k, v, q_bias, k_bias, None, False, 1 / np.sqrt(headdim))
+
+## PyTorch-SDPA-based FlashBias
+import torch
+# Notably, the dimension of concat[q, q_bias] should be divided evenly by 8; otherwise, you cannot activate flashattention in the backend
+output_flash_sdpa = torch.nn.functional.scaled_dot_product_attention(
+    query=torch.concat([q * softmax_scale, q_bias], dim=-1),
+    key=torch.concat([k, k_bias], dim=-1),
+    value=v,
+    attn_mask=None,
+    dropout_p=0.0,
+    scale=1,
+    is_causal=causal,
+)
 ```
 
 ## Overall Comparison

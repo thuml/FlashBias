@@ -183,3 +183,55 @@ def attention_sdpa(q, k, v, softmax_scale, bias=None, causal=False):
 
     # Return to original format (B, Lq, Nh, D)
     return output.transpose(1, 2)
+
+
+def flashbias_sdpa(q, k, v, q_bias, k_bias, softmax_scale, bias=None, causal=False):
+    """
+    Implements scaled dot-product attention using PyTorch's F.scaled_dot_product_attention.
+
+    Args:
+        q: Query tensor of shape (batch_size, seqlen_q, nheads, headdim)
+        k: Key tensor of shape (batch_size, seqlen_k, nheads, headdim)
+        v: Value tensor of shape (batch_size, seqlen_k, nheads, headdim)
+        softmax_scale: Scalar for softmax normalization (default: 1/sqrt(headdim))
+        bias: Optional bias tensor, shape (batch, nheads, seqlen_q, seqlen_k)
+
+    Returns:
+        Output tensor of shape (batch_size, seqlen_q, nheads, headdim)
+    """
+    # SDPA expects input of shape (B, Nh, L, D)
+    # Our inputs are already in this format after transposing
+    q = q.transpose(1, 2)  # (batch, nheads, seqlen_q, headdim)
+    k = k.transpose(1, 2)  # (batch, nheads, seqlen_k, headdim)
+    v = v.transpose(1, 2)  # (batch, nheads, seqlen_k, headdim)
+    q_bias = q_bias.transpose(1, 2)
+    k_bias = k_bias.transpose(1, 2)
+    _, _, _, q_hidden = q.shape
+    _, _, _, q_bias_hidden = q_bias.shape
+    if (q_hidden + q_bias_hidden) % 8 == 0:
+        # Call SDPA with our inputs
+        output = torch.nn.functional.scaled_dot_product_attention(
+            query=torch.concat([q * softmax_scale, q_bias], dim=-1),
+            key=torch.concat([k, k_bias], dim=-1),
+            value=v,
+            attn_mask=None,
+            dropout_p=0.0,
+            scale=1,
+            is_causal=causal,
+        )
+    else:
+        blank = torch.zeros(q.shape[0], q.shape[1], q.shape[2], 8 - ((q_hidden + q_bias_hidden) % 8), device=q.device,
+                            dtype=q.dtype)
+        # Call SDPA with our inputs
+        output = torch.nn.functional.scaled_dot_product_attention(
+            query=torch.concat([q * softmax_scale, q_bias, blank], dim=-1),
+            key=torch.concat([k, k_bias, blank], dim=-1),
+            value=v,
+            attn_mask=None,
+            dropout_p=0.0,
+            scale=1,
+            is_causal=causal,
+        )
+
+    # Return to original format (B, Lq, Nh, D)
+    return output.transpose(1, 2)

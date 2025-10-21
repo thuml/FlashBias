@@ -20,6 +20,7 @@ python benchmark_alibi_gpt2.py
 3. Check the efficiency benchmark among
 
 - Triton implementation of FlashBias (**Ours**)
+- PyTorch-SDPA based implementation of FlashBias (**Ours**)
 - Triton implementation of FlashAttention with Bias ([Opensource Implementation](https://github.com/pengzhangzhi/Flash-Attention-with-Bias-Triton))
 - Pytorch implementation of vanilla attention with Bias
 - Pytorch implementation of vanilla attention with Bias with Compile
@@ -28,28 +29,43 @@ python benchmark_alibi_gpt2.py
 
 ## Efficiency Comparison
 
+We suggest to use [Triton-based FlashBias](https://github.com/thuml/FlashBias/blob/main/flash_bias/flash_bias_triton.py) in inference and [PyTorch-SDPA-based FlashBias](https://github.com/thuml/FlashBias/blob/main/flash_bias/attention_func.py) for training.
+
 <p align="center">
-<img src=".\attention-comparison-batch2-head4-d32-r8-fwd.png" height = "250" alt="" align=center />
+<img src=".\attention-comparison-batch2-head4-d32-r8-causalFalse-fwd.png" height = "250" alt="" align=center />
 <br><br>
 <b>Figure 1.</b> Efficiency comparison for forward pass.
 </p>
 
 <p align="center">
-<img src=".\attention-comparison-batch2-head4-d32-r8-bwd.png" height = "250" alt="" align=center />
+<img src=".\attention-comparison-batch2-head4-d32-r8-causalFalse-bwd.png" height = "250" alt="" align=center />
 <br><br>
 <b>Figure 2.</b> Efficiency comparison for backward propagation.
 </p>
 
+
 ## Quick Start of FlashBias
 
-See `flash_bias_triton.py` for more details.
-
 ```python
+## Triton-based FlashBias, See `flash_bias_triton.py` for more details.
 from flash_bias_triton import flash_bias_func
-output_flash = flash_bias_func(q, k, v, q_bias, k_bias, None, False, 1 / np.sqrt(headdim))
+output_flash_triton = flash_bias_func(q, k, v, q_bias, k_bias, None, False, 1 / np.sqrt(headdim))
+
+## PyTorch-SDPA-based FlashBias
+import torch
+# Notably, the dimension of concat[q, q_bias] should be divided evenly by 8; otherwise, you cannot activate flashattention in the backend
+output_flash_sdpa = torch.nn.functional.scaled_dot_product_attention(
+    query=torch.concat([q * softmax_scale, q_bias], dim=-1),
+    key=torch.concat([k, k_bias], dim=-1),
+    value=v,
+    attn_mask=None,
+    dropout_p=0.0,
+    scale=1,
+    is_causal=causal,
+)
 ```
 
-## API Configuration
+## Triton Kernel API Configuration
 
 ```python
 flash_bias_func(q, k, v, q_bias=None, k_bias=None, mask=None, causal=False, softmax_scale=None)
