@@ -1,5 +1,5 @@
 # FlashBias (NeurIPS 2025)
-FlashBias: Fast Computation of Attention with Bias [[Paper]](https://arxiv.org/pdf/2505.12044)
+FlashBias: Fast Computation of Attention with Bias [[Paper]](https://arxiv.org/pdf/2505.12044) [[Slides]](https://wuhaixu2016.github.io/pdf/NeurIPS2025_FlashBias.pdf) [[Poster]](https://wuhaixu2016.github.io/pdf/poster_NeurIPS2025_FlashBias.pdf)
 
 Attention with bias widely exists, such as relative position encoding in [Swin Transformer](https://github.com/microsoft/Swin-Transformer), scientific prior encoding in [AlphaFold (Nature 2024)](https://www.nature.com/articles/s41586-024-07487-w) and [Pangu-Weather (Nature 2023)](https://www.nature.com/articles/s41586-023-06185-3). Surprisingly, despite the common use of attention with bias, its targeted efficiency optimization remains absent.
 
